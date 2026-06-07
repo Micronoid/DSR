@@ -223,6 +223,13 @@ def save_config(cfg):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
+def get_subprocess_kwargs():
+    """Get subprocess kwargs to hide console window on Windows."""
+    kwargs = {}
+    if sys.platform == 'win32':
+        kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+    return kwargs
+
 def find_ffmpeg():
     ffmpeg_path = shutil.which('ffmpeg')
     ffplay_path = shutil.which('ffplay')
@@ -556,7 +563,7 @@ class AudioPlayerThread(QThread):
                         str(ffmpeg_path), '-y', '-i', self.filepath,
                         '-ar', '48000', '-ac', '1', temp_wav
                     ]
-                    subprocess.run(cmd, capture_output=True, timeout=30, check=True)
+                    subprocess.run(cmd, capture_output=True, timeout=30, check=True, **get_subprocess_kwargs())
                     self.data, self.samplerate = sf.read(temp_wav, dtype='float32')
                     if len(self.data.shape) == 1:
                         self.data = self.data.reshape(-1, 1)
@@ -892,7 +899,7 @@ class SimplePlayer(QWidget):
                 ffprobe, '-v', 'error', '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1', filepath
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, **get_subprocess_kwargs())
             return float(result.stdout.strip())
         except:
             return 0
@@ -1306,7 +1313,7 @@ class EditorPlayer(QWidget):
                 ffprobe, '-v', 'error', '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1', filepath
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, **get_subprocess_kwargs())
             return float(result.stdout.strip())
         except:
             return 0
@@ -1822,7 +1829,7 @@ class MainWindow(QMainWindow):
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True,
-                check=True, timeout=60
+                check=True, timeout=60, **get_subprocess_kwargs()
             )
 
             self.source_player.load_file(str(output_path))
