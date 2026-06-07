@@ -1675,21 +1675,39 @@ class MainWindow(QMainWindow):
         # Install event filter on the application to catch arrow keys before focus navigation
         QApplication.instance().installEventFilter(self)
 
-        # Space - play/pause (QShortcut works fine for space)
+        # A - previous file
+        self.shortcut_prev_a = QShortcut(QKeySequence("A"), self)
+        self.shortcut_prev_a.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_prev_a.activated.connect(self.on_prev_shortcut)
+
+        # D - next file
+        self.shortcut_next_d = QShortcut(QKeySequence("D"), self)
+        self.shortcut_next_d.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_next_d.activated.connect(self.on_next_shortcut)
+
+        # Space - play/pause
         self.shortcut_play = QShortcut(QKeySequence("Space"), self)
         self.shortcut_play.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_play.activated.connect(self.on_play_shortcut)
 
+    def on_prev_shortcut(self):
+        if self.source_player and self.source_player.isVisible():
+            self.source_player.prev_file()
+
+    def on_next_shortcut(self):
+        if self.source_player and self.source_player.isVisible():
+            self.source_player.next_file()
+
     def eventFilter(self, obj, event):
         if event.type() == event.Type.KeyPress:
             key = event.key()
-            # Left arrow or A - previous file
-            if key == Qt.Key.Key_Left or key == Qt.Key.Key_A:
+            # Left arrow - previous file
+            if key == Qt.Key.Key_Left:
                 if self.source_player and self.source_player.isVisible():
                     self.source_player.prev_file()
                 return True
-            # Right arrow or D - next file
-            elif key == Qt.Key.Key_Right or key == Qt.Key.Key_D:
+            # Right arrow - next file
+            elif key == Qt.Key.Key_Right:
                 if self.source_player and self.source_player.isVisible():
                     self.source_player.next_file()
                 return True
