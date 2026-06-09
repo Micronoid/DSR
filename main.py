@@ -24,7 +24,7 @@ except ImportError:
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFileDialog, QFrame, QMessageBox,
-    QSlider, QProgressBar, QMenu, QScrollArea, QSizePolicy, QDialog
+    QSlider, QProgressBar, QMenu, QScrollArea, QSizePolicy, QDialog, QStyle
 )
 from PyQt6.QtGui import QPainterPath
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QRect
@@ -384,8 +384,8 @@ class WaveformWidget(QWidget):
         self.trim_start = 0.0
         self.trim_end = 1.0
         self.dragging = None
-        self.setMinimumHeight(90)
-        self.setMaximumHeight(110)
+        self.setMinimumHeight(50)
+        self.setMaximumHeight(70)
 
     def set_audio(self, filepath):
         try:
@@ -530,12 +530,13 @@ class AudioPlayerThread(QThread):
     finished_playing = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, filepath, speed=1.0, start_sec=0.0, end_sec=None):
+    def __init__(self, filepath, speed=1.0, start_sec=0.0, end_sec=None, volume=1.0):
         super().__init__()
         self.filepath = filepath
         self.speed = speed
         self.start_sec = start_sec
         self.end_sec = end_sec
+        self.volume = max(0.0, min(1.0, volume))
         self.is_playing = False
         self.is_paused = False
         self.position = 0
@@ -604,7 +605,7 @@ class AudioPlayerThread(QThread):
                     outdata[:] = 0
                     if np.any(valid):
                         valid_indices = indices[valid]
-                        outdata[:len(valid_indices)] = self.data[valid_indices]
+                        outdata[:len(valid_indices)] = self.data[valid_indices] * self.volume
 
                     self.position = int(indices[-1]) + 1 if len(indices) > 0 else self.position
 
@@ -648,6 +649,10 @@ class AudioPlayerThread(QThread):
         with self._lock:
             self.speed = max(0.25, min(2.0, speed))
 
+    def set_volume(self, volume):
+        with self._lock:
+            self.volume = max(0.0, min(2.0, volume))
+
 class SimplePlayer(QWidget):
     def __init__(self, on_loaded=None, parent=None):
         super().__init__(parent)
@@ -674,7 +679,7 @@ class SimplePlayer(QWidget):
                 border: 2px dashed #3a7a3a;
                 border-radius: 12px;
                 background-color: #0d1f0d;
-                min-height: 100px;
+                min-height: 70px;
             }
             QFrame:hover {
                 border-color: #6aba6a;
@@ -690,8 +695,29 @@ class SimplePlayer(QWidget):
         self.drop_label.setStyleSheet("color: #6aba6a; font-size: 14px;")
         drop_layout.addWidget(self.drop_label)
 
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.steam_btn = QPushButton("Steam")
+        self.steam_btn.setFixedWidth(100)
+        self.steam_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1a3a1a;
+                color: #66bb6a;
+                border: 2px solid #3a7a3a;
+                border-radius: 8px;
+                padding: 10px 16px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #2a5a2a; border-color: #4a9a4a; }
+        """)
+        self.steam_btn.clicked.connect(self.open_steam_folder)
+        btn_row.addWidget(self.steam_btn)
+
         self.open_btn = QPushButton(tr("open_folder"))
-        self.open_btn.setFixedWidth(160)
+        self.open_btn.setFixedWidth(180)
         self.open_btn.setStyleSheet("""
             QPushButton {
                 background-color: #3a7a3a;
@@ -704,14 +730,16 @@ class SimplePlayer(QWidget):
             QPushButton:hover { background-color: #4a9a4a; }
         """)
         self.open_btn.clicked.connect(self.open_folder)
-        drop_layout.addWidget(self.open_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        btn_row.addWidget(self.open_btn)
+
+        drop_layout.addLayout(btn_row)
 
         layout.addWidget(self.drop_frame)
 
         self.info_widget = QWidget()
         info_layout = QVBoxLayout(self.info_widget)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(8)
+        info_layout.setContentsMargins(0, 4, 0, 0)
+        info_layout.setSpacing(4)
 
         file_row = QHBoxLayout()
 
@@ -839,6 +867,23 @@ class SimplePlayer(QWidget):
             elif self.is_audio(path):
                 self.load_folder(os.path.dirname(path))
 
+    def open_steam_folder(self):
+        steam_paths = [
+            Path(r'C:/Program Files (x86)/Steam/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'C:/SteamLibrary/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'D:/SteamLibrary/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'D:/Steam/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'E:/SteamLibrary/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'E:/Steam/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+        ]
+
+        for steam_path in steam_paths:
+            if steam_path.exists():
+                self.load_folder(str(steam_path))
+                return
+
+        QMessageBox.warning(self, tr("error"), "Steam DDNet folder not found!\nChecked: C, D, E drives")
+
     def is_audio(self, path):
         ext = Path(path).suffix.lower()
         return ext in ('.mp3', '.wav', '.wv', '.ogg', '.flac', '.m4a', '.aac')
@@ -885,6 +930,10 @@ class SimplePlayer(QWidget):
         if self.on_loaded:
             self.on_loaded(self)
 
+        # Refresh time label after a short delay to ensure duration is loaded
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self.update_time_label)
+
     def get_duration(self, filepath):
         try:
             ffprobe = 'ffprobe'
@@ -905,9 +954,10 @@ class SimplePlayer(QWidget):
             return 0
 
     def update_time_label(self):
-        mins = int(self.duration // 60)
-        secs = int(self.duration % 60)
-        self.time_label.setText(f"00:00.000 / {mins:02d}:{secs:02d}.000")
+        dur_mins = int(self.duration // 60)
+        dur_secs = int(self.duration % 60)
+        dur_ms = int((self.duration % 1) * 1000)
+        self.time_label.setText(f"00:00.000 / {dur_mins:02d}:{dur_secs:02d}.{dur_ms:03d}")
 
     def update_navigation(self):
         if not self.audio_files:
@@ -957,8 +1007,28 @@ class SimplePlayer(QWidget):
         """)
 
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        # Search box
+        from PyQt6.QtWidgets import QLineEdit
+        self._search_box = QLineEdit()
+        self._search_box.setPlaceholderText("Search...")
+        self._search_box.setStyleSheet("""
+            QLineEdit {
+                background-color: #0f2a0f;
+                color: #c0f0c0;
+                border: 1px solid #3a7a3a;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #6aba6a;
+            }
+        """)
+        self._search_box.textChanged.connect(self._filter_dropdown)
+        layout.addWidget(self._search_box)
 
         # Scroll area for the list
         from PyQt6.QtWidgets import QScrollArea, QScrollBar
@@ -992,9 +1062,9 @@ class SimplePlayer(QWidget):
         """)
 
         list_widget = QWidget()
-        list_layout = QVBoxLayout(list_widget)
-        list_layout.setContentsMargins(4, 4, 4, 4)
-        list_layout.setSpacing(2)
+        self._list_layout = QVBoxLayout(list_widget)
+        self._list_layout.setContentsMargins(4, 4, 4, 4)
+        self._list_layout.setSpacing(2)
 
         for i, f in enumerate(self.audio_files):
             name = f.name
@@ -1034,9 +1104,9 @@ class SimplePlayer(QWidget):
                 """)
 
             item_btn.clicked.connect(lambda checked, idx=i: self._on_dropdown_selected(idx))
-            list_layout.addWidget(item_btn)
+            self._list_layout.addWidget(item_btn)
 
-        list_layout.addStretch()
+        self._list_layout.addStretch()
         scroll.setWidget(list_widget)
         layout.addWidget(scroll)
 
@@ -1046,12 +1116,12 @@ class SimplePlayer(QWidget):
         # Adjust for window offset
         win_pos = self.window().mapFromGlobal(btn_pos)
 
-        container.setGeometry(0, 0, 300, min(320, len(self.audio_files) * 36 + 16))
+        container.setGeometry(0, 0, 300, min(360, len(self.audio_files) * 36 + 60))
         self._dropdown.setGeometry(
             self.window().mapToGlobal(win_pos).x(),
             self.window().mapToGlobal(win_pos).y() + 4,
             300,
-            min(320, len(self.audio_files) * 36 + 16)
+            min(360, len(self.audio_files) * 36 + 60)
         )
 
         # Use a simpler layout for the popup
@@ -1060,6 +1130,13 @@ class SimplePlayer(QWidget):
         drop_layout.addWidget(container)
 
         self._dropdown.show()
+
+    def _filter_dropdown(self, text):
+        text = text.lower()
+        for i in range(self._list_layout.count() - 1):  # -1 for stretch
+            widget = self._list_layout.itemAt(i).widget()
+            if widget:
+                widget.setVisible(text in widget.text().lower())
 
     def _on_dropdown_selected(self, index):
         if hasattr(self, '_dropdown') and self._dropdown:
@@ -1104,7 +1181,8 @@ class SimplePlayer(QWidget):
         ms = int((pos % 1) * 1000)
         dur_mins = int(self.duration // 60)
         dur_secs = int(self.duration % 60)
-        self.time_label.setText(f"{mins:02d}:{secs:02d}.{ms:03d} / {dur_mins:02d}:{dur_secs:02d}.000")
+        dur_ms = int((self.duration % 1) * 1000)
+        self.time_label.setText(f"{mins:02d}:{secs:02d}.{ms:03d} / {dur_mins:02d}:{dur_secs:02d}.{dur_ms:03d}")
 
     def on_playback_finished(self):
         self.play_btn.set_playing(False)
@@ -1114,7 +1192,7 @@ class SimplePlayer(QWidget):
     def stop_playback(self):
         if self.play_thread and self.play_thread.isRunning():
             self.play_thread.stop()
-            self.play_thread.wait(1000)
+            # Don't wait - let it finish in background
         self.play_thread = None
         self.play_btn.set_playing(False)
         self.update_time_label()
@@ -1147,7 +1225,7 @@ class EditorPlayer(QWidget):
                 border: 2px dashed #3a7a3a;
                 border-radius: 12px;
                 background-color: #0d1f0d;
-                min-height: 100px;
+                min-height: 70px;
             }
             QFrame:hover {
                 border-color: #6aba6a;
@@ -1183,8 +1261,8 @@ class EditorPlayer(QWidget):
 
         self.info_widget = QWidget()
         info_layout = QVBoxLayout(self.info_widget)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(10)
+        info_layout.setContentsMargins(0, 8, 0, 0)
+        info_layout.setSpacing(6)
 
         file_row = QHBoxLayout()
 
@@ -1197,13 +1275,31 @@ class EditorPlayer(QWidget):
         self.name_label.setWordWrap(True)
         file_row.addWidget(self.name_label, 1)
 
-
+        self.change_file_btn = QPushButton("...")
+        self.change_file_btn.setFixedSize(32, 32)
+        self.change_file_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1a3a1a;
+                color: #c0f0c0;
+                border: 1px solid #3a7a3a;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #2a5a2a; }
+        """)
+        self.change_file_btn.clicked.connect(self.choose_file)
+        file_row.addWidget(self.change_file_btn)
 
         info_layout.addLayout(file_row)
+
+        info_layout.addSpacing(4)
 
         self.waveform = WaveformWidget()
         self.waveform.trim_changed.connect(self.on_trim_changed)
         info_layout.addWidget(self.waveform)
+
+        info_layout.addSpacing(2)
 
         info_layout.addSpacing(10)
 
@@ -1212,24 +1308,27 @@ class EditorPlayer(QWidget):
         self.progress_slider.setValue(0)
         self.progress_slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                height: 5px;
+                height: 8px;
                 background: #1a3a1a;
-                border-radius: 2px;
+                border-radius: 4px;
             }
             QSlider::handle:horizontal {
-                width: 14px;
-                height: 14px;
+                width: 16px;
+                height: 16px;
                 background: #c0f0c0;
-                border-radius: 7px;
+                border-radius: 8px;
                 margin: -4px 0;
             }
             QSlider::sub-page:horizontal {
                 background: #4a9a4a;
-                border-radius: 2px;
+                border-radius: 4px;
             }
         """)
         self.progress_slider.sliderPressed.connect(self.on_slider_pressed)
         self.progress_slider.sliderReleased.connect(self.on_slider_released)
+        self.progress_slider.sliderMoved.connect(self.on_slider_moved)
+        # Click anywhere on slider to seek
+        self.progress_slider.mousePressEvent = self._progress_mouse_press
         info_layout.addWidget(self.progress_slider)
 
         time_row = QHBoxLayout()
@@ -1251,6 +1350,93 @@ class EditorPlayer(QWidget):
 
         info_layout.addLayout(time_row)
 
+        # Volume and Speed controls row
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(15)
+
+        # Volume
+        vol_layout = QHBoxLayout()
+        vol_layout.setSpacing(4)
+        vol_label = QLabel("Vol:")
+        vol_label.setStyleSheet("color: #6aba6a; font-size: 10px;")
+        vol_layout.addWidget(vol_label)
+
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setRange(0, 200)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setFixedWidth(100)
+        self.volume_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #1a3a1a;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                width: 14px;
+                height: 20px;
+                background: #c0f0c0;
+                border-radius: 4px;
+                margin: -7px 0;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4a9a4a;
+                border-radius: 3px;
+            }
+        """)
+        self.volume_slider.valueChanged.connect(self.on_volume_changed)
+        vol_layout.addWidget(self.volume_slider)
+
+        self.volume_label = QLabel("100%")
+        self.volume_label.setStyleSheet("color: #6aba6a; font-size: 10px; min-width: 30px;")
+        vol_layout.addWidget(self.volume_label)
+
+        controls_row.addLayout(vol_layout)
+        controls_row.addStretch()
+
+        # Speed
+        speed_layout = QHBoxLayout()
+        speed_layout.setSpacing(4)
+        speed_label = QLabel("Speed:")
+        speed_label.setStyleSheet("color: #6aba6a; font-size: 10px;")
+        speed_layout.addWidget(speed_label)
+
+        self.speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self.speed_slider.setRange(25, 200)
+        self.speed_slider.setValue(100)
+        self.speed_slider.setFixedWidth(100)
+        self.speed_slider.setSingleStep(25)
+        self.speed_slider.setPageStep(25)
+        self.speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.speed_slider.setTickInterval(25)
+        self.speed_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #1a3a1a;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                width: 14px;
+                height: 20px;
+                background: #c0f0c0;
+                border-radius: 4px;
+                margin: -7px 0;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4a9a4a;
+                border-radius: 3px;
+            }
+        """)
+        self.speed_slider.valueChanged.connect(self.on_speed_changed)
+        speed_layout.addWidget(self.speed_slider)
+
+        self.speed_label = QLabel("1.0x")
+        self.speed_label.setStyleSheet("color: #6aba6a; font-size: 10px; min-width: 30px;")
+        speed_layout.addWidget(self.speed_label)
+
+        controls_row.addLayout(speed_layout)
+
+        info_layout.addLayout(controls_row)
+
         self.info_widget.hide()
         layout.addWidget(self.info_widget)
 
@@ -1266,6 +1452,23 @@ class EditorPlayer(QWidget):
             filepath = urls[0].toLocalFile()
             if self.is_audio(filepath):
                 self.load_file(filepath)
+
+    def open_steam_folder(self):
+        steam_paths = [
+            Path(r'C:/Program Files (x86)/Steam/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'C:/SteamLibrary/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'D:/SteamLibrary/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'D:/Steam/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'E:/SteamLibrary/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+            Path(r'E:/Steam/steamapps/common/DDraceNetwork/ddnet/data/audio'),
+        ]
+
+        for steam_path in steam_paths:
+            if steam_path.exists():
+                self.load_folder(str(steam_path))
+                return
+
+        QMessageBox.warning(self, tr("error"), "Steam DDNet folder not found!\nChecked: C, D, E drives")
 
     def is_audio(self, path):
         ext = Path(path).suffix.lower()
@@ -1334,6 +1537,8 @@ class EditorPlayer(QWidget):
         self.trim_end = end
         self.trim_info.setText(
             tr("trim_info", self.format_time(start), self.format_time(end), self.format_time(end-start)))
+        # Stop playback when trimming
+        self.stop_playback()
 
     def toggle_play(self):
         if not self.filepath:
@@ -1349,10 +1554,14 @@ class EditorPlayer(QWidget):
         if not self.filepath:
             return
 
+        speed = self.speed_slider.value() / 100.0
+        volume = self.volume_slider.value() / 100.0
+
         self.play_thread = AudioPlayerThread(
-            self.filepath, 1.0, 
+            self.filepath, speed, 
             start_sec=self.trim_start, 
-            end_sec=self.trim_end
+            end_sec=self.trim_end,
+            volume=volume
         )
         self.play_thread.position_changed.connect(self.on_position_changed)
         self.play_thread.finished_playing.connect(self.on_playback_finished)
@@ -1365,7 +1574,7 @@ class EditorPlayer(QWidget):
     def stop_playback(self):
         if self.play_thread and self.play_thread.isRunning():
             self.play_thread.stop()
-            self.play_thread.wait(1000)
+            # Don't wait - let it finish in background
         self.play_thread = None
         self.is_paused = False
         self.play_btn.set_playing(False)
@@ -1373,9 +1582,11 @@ class EditorPlayer(QWidget):
         self.current_time.setText(self.format_time(self.trim_start))
 
     def on_position_changed(self, pos):
-        if self.duration > 0:
+        if self.duration > 0 and not getattr(self, '_slider_dragging', False):
             value = int((pos / self.duration) * 1000)
+            self.progress_slider.blockSignals(True)
             self.progress_slider.setValue(value)
+            self.progress_slider.blockSignals(False)
         self.current_time.setText(self.format_time(pos))
 
     def on_playback_finished(self):
@@ -1399,7 +1610,57 @@ class EditorPlayer(QWidget):
             pos = max(self.trim_start, min(pos, self.trim_end))
             self.play_thread.seek(pos)
 
+    def on_slider_moved(self, value):
+        if self.duration > 0:
+            pos = (value / 1000.0) * self.duration
+            pos = max(self.trim_start, min(pos, self.trim_end))
+            self.current_time.setText(self.format_time(pos))
 
+    def _progress_mouse_press(self, event):
+        # Calculate value from click position
+        if self.duration > 0:
+            slider = self.progress_slider
+            value = QStyle.sliderValueFromPosition(
+                slider.minimum(), slider.maximum(),
+                event.pos().x(), slider.width()
+            )
+            slider.setValue(value)
+            pos = (value / 1000.0) * self.duration
+            pos = max(self.trim_start, min(pos, self.trim_end))
+            self.current_time.setText(self.format_time(pos))
+            if self.play_thread and self.play_thread.isRunning():
+                self.play_thread.seek(pos)
+        # Call original handler
+        QSlider.mousePressEvent(self.progress_slider, event)
+
+
+
+    def on_volume_changed(self, value):
+        self.volume_label.setText(f"{value}%")
+        if self.play_thread and self.play_thread.isRunning():
+            self.play_thread.set_volume(value / 100.0)
+
+    def on_speed_changed(self, value):
+        speed = value / 100.0
+        self.speed_label.setText(f"{speed:.1f}x")
+        # Restart playback to avoid crackling when speed changes
+        if self.play_thread and self.play_thread.isRunning():
+            was_playing = True
+            current_pos = self.play_thread.position / self.play_thread.samplerate
+            self.stop_playback()
+            # Restart with new speed from current position
+            self.play_thread = AudioPlayerThread(
+                self.filepath, speed,
+                start_sec=max(current_pos, self.trim_start),
+                end_sec=self.trim_end,
+                volume=self.volume_slider.value() / 100.0
+            )
+            self.play_thread.position_changed.connect(self.on_position_changed)
+            self.play_thread.finished_playing.connect(self.on_playback_finished)
+            self.play_thread.error.connect(self.on_playback_error)
+            self.play_thread.start()
+            self.is_paused = False
+            self.play_btn.set_playing(True)
 
     def clear(self):
         self.stop_playback()
@@ -1411,6 +1672,8 @@ class EditorPlayer(QWidget):
         self.waveform.data = None
         self.waveform.update()
         self.trim_info.setText(tr("trim_full"))
+        self.volume_slider.setValue(100)
+        self.speed_slider.setValue(100)
         self.drop_frame.show()
         self.info_widget.hide()
 
@@ -1457,7 +1720,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(tr("app_title"))
-        self.setMinimumSize(600, 700)
+        self.setMinimumSize(600, 760)
+        self.resize(650, 780)
 
         self.source_file = None
         self.ffmpeg_dir = find_ffmpeg()
@@ -1480,8 +1744,8 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setSpacing(16)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 12, 16, 12)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         title = QLabel("DDNet Sound Replacer")
@@ -1584,9 +1848,20 @@ class MainWindow(QMainWindow):
         self.source_player = SimplePlayer(on_loaded=self.on_source_loaded)
         layout.addWidget(self.source_player)
 
+        replace_row = QHBoxLayout()
+        replace_row.setSpacing(10)
+
         replace_label = QLabel(tr("new_title"))
         replace_label.setStyleSheet("color: #c0f0c0; font-size: 14px; font-weight: bold;")
-        layout.addWidget(replace_label)
+        replace_row.addWidget(replace_label)
+
+        replace_row.addStretch()
+
+        mp3_hint = QLabel("Recommended: mp3")
+        mp3_hint.setStyleSheet("color: #3a7a3a; font-size: 10px; background: transparent;")
+        replace_row.addWidget(mp3_hint)
+
+        layout.addLayout(replace_row)
 
         self.new_player = EditorPlayer(on_loaded=self.on_new_loaded)
         self.new_player.setEnabled(False)
@@ -1594,7 +1869,7 @@ class MainWindow(QMainWindow):
 
         self.target_card = None
 
-        layout.addSpacing(10)
+        layout.addSpacing(4)
 
         btn_container = QWidget()
         btn_layout = QHBoxLayout(btn_container)
@@ -1652,6 +1927,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.subtitle_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addStretch()
+        layout.setStretch(layout.count() - 1, 1)
 
     def apply_dark_theme(self):
         self.setStyleSheet("""
@@ -1714,9 +1990,7 @@ class MainWindow(QMainWindow):
         return super().eventFilter(obj, event)
 
     def on_play_shortcut(self):
-        if self.new_player and self.new_player.filepath:
-            self.new_player.toggle_play()
-        elif self.source_player and self.source_player.filepath:
+        if self.source_player and self.source_player.filepath:
             self.source_player.toggle_play()
 
     def _show_success(self):
@@ -1832,6 +2106,8 @@ class MainWindow(QMainWindow):
         trim_start = getattr(self.new_player, 'trim_start', 0)
         trim_end = getattr(self.new_player, 'trim_end', 0)
         duration = trim_end - trim_start if trim_end > trim_start else 0
+        speed = self.new_player.speed_slider.value() / 100.0
+        volume = self.new_player.volume_slider.value() / 100.0
 
         cmd = [ffmpeg, '-y']
 
@@ -1841,6 +2117,26 @@ class MainWindow(QMainWindow):
             cmd.extend(['-t', str(duration)])
 
         cmd.extend(['-i', self.new_player.filepath])
+
+        # Build audio filter chain
+        afilters = []
+
+        # Apply speed change
+        # asetrate tells ffmpeg the samples were recorded at adjusted_rate
+        # When played back at original_rate, speed changes proportionally
+        # speed=2.0 -> asetrate=96000 -> played at 48000 = 2x faster
+        if speed != 1.0:
+            original_rate = 48000
+            adjusted_rate = int(original_rate * speed)
+            afilters.append(f'asetrate={adjusted_rate},aresample={original_rate}')
+
+        # Apply volume
+        if volume != 1.0:
+            afilters.append(f'volume={volume:.2f}')
+
+        if afilters:
+            cmd.extend(['-af', ','.join(afilters)])
+
         cmd.extend(['-ar', '48000', '-ac', '1', '-sample_fmt', 's16p'])
         cmd.append(str(output_path))
 
@@ -1849,6 +2145,26 @@ class MainWindow(QMainWindow):
                 cmd, capture_output=True, text=True,
                 check=True, timeout=60, **get_subprocess_kwargs()
             )
+
+            # Backup to "new sounds" folder next to exe/script
+            try:
+                # Get directory of running script/exe
+                if getattr(sys, 'frozen', False):
+                    # Running as compiled exe
+                    app_dir = Path(sys.executable).parent
+                else:
+                    # Running as script
+                    app_dir = Path(__file__).parent
+
+                backup_dir = app_dir / 'new sounds'
+                backup_dir.mkdir(parents=True, exist_ok=True)
+
+                source_name = Path(self.source_file).stem
+                backup_path = backup_dir / f"{source_name}.wv"
+                shutil.copy2(str(output_path), str(backup_path))
+                print(f"Backup saved to: {backup_path}")
+            except Exception as e:
+                print(f"Backup failed: {e}")  # Debug
 
             self.source_player.load_file(str(output_path))
             self._show_success()
