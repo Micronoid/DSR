@@ -81,71 +81,6 @@ def main(page: ft.Page):
 
     
 
-    async def build_assets():
-        """Скачивание assets, настройка языка, построение UI."""
-        sys_lang = i18n.detect_system_lang()
-
-        assets_ok = await ensure_assets_async()
-
-        if not assets_ok:
-            local_assets = Path(__file__).parent / "assets" / "translations.json"
-            if local_assets.exists():
-                print("[INIT] Используем локальные assets (dev fallback)")
-                assets_ok = True
-            else:
-                print("[INIT] Assets не найдены ни в AppData, ни локально")
-
-                async def _retry(e):
-                    dlg.open = False
-                    page.update()
-                    await build_assets()
-                
-                async def _close(e):
-                    dlg.open = False
-                    page.update()
-                    await page.window.close()
-
-                dlg = ft.AlertDialog(
-                    modal=True,
-                    title=ft.Text(
-                        "Ошибка запуска" if sys_lang == 'ru' else "Launch Error",
-                        weight=ft.FontWeight.BOLD
-                    ),
-                    content=ft.Text(
-                        "Не хватает ресурсов для запуска приложения. Подключитесь к интернету для загрузки файлов с GitHub."
-                        if sys_lang == 'ru' else
-                        "Not enough resources to launch the application. Please connect to the internet to download files from GitHub."
-                    ),
-                    actions=[
-                        ft.TextButton(
-                            "Повторить" if sys_lang == 'ru' else "Retry",
-                            on_click=lambda e: page.run_task(_retry, e)
-                        ),
-                        ft.TextButton(
-                            "Закрыть" if sys_lang == 'ru' else "Close",
-                            on_click=lambda e: page.run_task(_close, e)
-                        ),
-                    ],
-                    actions_alignment=ft.MainAxisAlignment.END,
-                )
-                page.overlay.append(dlg)
-                dlg.open = True
-                page.update()
-                return
-
-        if CURRENT_VERSION != "dev":
-            page.run_task(check_updates)
-
-    sys_lang = i18n.detect_system_lang()
-    i18n.set_lang(sys_lang)
-    cfg = load_config()
-    saved_lang = cfg.get('lang')
-    if saved_lang:
-        i18n.set_lang(saved_lang)
-    else:
-        cfg['lang'] = sys_lang
-        save_config(cfg)
-
     def build_ui():
         global is_converting
 
@@ -408,7 +343,84 @@ def main(page: ft.Page):
         )
         page.add(shell)
 
+    # Loading indicator
+    loading_indicator = ft.Container(
+        content=ft.Column([
+            ft.ProgressRing(width=32, height=32, color=ft.Colors.PINK_400),
+            ft.Text(i18n.t("loading") if hasattr(i18n, "t") else "Загрузка...", size=14, color=ft.Colors.GREY_600)
+        ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+        alignment=ft.Alignment.CENTER,
+        expand=True
+    )
+    page.add(loading_indicator)
+
+    async def build_assets():
+        """Скачивание assets, настройка языка, построение UI."""
+        sys_lang = i18n.detect_system_lang()
+        i18n.set_lang(sys_lang)
+        cfg = load_config()
+        saved_lang = cfg.get('lang')
+        if saved_lang:
+            i18n.set_lang(saved_lang)
+        else:
+            cfg['lang'] = sys_lang
+            save_config(cfg)
+
+        assets_ok = await ensure_assets_async()
+
+        if not assets_ok:
+            local_assets = Path(__file__).parent / "assets" / "translations.json"
+            if local_assets.exists():
+                print("[INIT] Используем локальные assets (dev fallback)")
+                assets_ok = True
+            else:
+                print("[INIT] Assets не найдены ни в AppData, ни локально")
+
+                async def _retry(e):
+                    dlg.open = False
+                    page.update()
+                    await build_assets()
+
+                async def _close(e):
+                    dlg.open = False
+                    page.update()
+                    await page.window.close()
+
+                dlg = ft.AlertDialog(
+                    modal=True,
+                    title=ft.Text(
+                        "Ошибка запуска" if sys_lang == 'ru' else "Launch Error",
+                        weight=ft.FontWeight.BOLD
+                    ),
+                    content=ft.Text(
+                        "Не хватает ресурсов для запуска приложения. Подключитесь к интернету для загрузки файлов с GitHub."
+                        if sys_lang == 'ru' else
+                        "Not enough resources to launch the application. Please connect to the internet to download files from GitHub."
+                    ),
+                    actions=[
+                        ft.TextButton(
+                            "Повторить" if sys_lang == 'ru' else "Retry",
+                            on_click=lambda e: page.run_task(_retry, e)
+                        ),
+                        ft.TextButton(
+                            "Закрыть" if sys_lang == 'ru' else "Close",
+                            on_click=lambda e: page.run_task(_close, e)
+                        ),
+                    ],
+                    actions_alignment=ft.MainAxisAlignment.END,
+                )
+                page.overlay.append(dlg)
+                dlg.open = True
+                page.update()
+                return
+
+        page.remove(loading_indicator)
+        build_ui()
+        page.update()
+
+        if CURRENT_VERSION != "dev":
+            page.run_task(check_updates)
+
     page.run_task(build_assets)
-    build_ui()
 
 ft.run(main)
