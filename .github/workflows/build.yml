@@ -1,0 +1,49 @@
+name: Build DSR Windows
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+
+      - name: Set version from tag
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          $content = "CURRENT_VERSION = `"" + $ver + "`"`nREPO_OWNER = `"xSpeCifica`"`nREPO_NAME = `"DSR`""
+          Set-Content -Path "utils/version.py" -Value $content
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          flet pack app.py `
+            --name "DSR" `
+            --icon assets/icon.ico `
+            --add-data "components;components" `
+            --add-data "utils;utils" `
+            --product-name "DDNet Sound Replacer" `
+            --file-description "DDNet Sound Replacer" `
+            --product-version "$tag" `
+            --file-version "$tag.0" `
+            --company-name "world is cruel & oneover" `
+            --yes
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DSR-${{ github.ref_name }}
+          path: dist/DSR.exe
