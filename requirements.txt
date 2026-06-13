@@ -1,5 +1,4 @@
-flet==0.85.3
 numpy
-soundfile
 sounddevice
-Pillow
+soundfile
+PyQt6
