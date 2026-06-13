@@ -49,3 +49,12 @@ jobs:
         with:
           name: DSR-${{ github.ref_name }}
           path: dist/DSR.exe
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/DSR.exe
+          name: DSR ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
